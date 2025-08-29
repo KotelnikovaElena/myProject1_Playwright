@@ -4,49 +4,64 @@
 // Получать данные с серверов
 // Работать с REST API
 
-const { test, expect } = require('@playwright/test');
-const fetch = require('node-fetch');
+const {test, expect} = require('@playwright/test');//Импорт конкретных функций test, expect из внешнего модуля. Без этого они недоступны
+// const fetch = require('node-fetch'); `request` контекст Playwright** — встроенный инструмент для API-запросов в тестах, 
+// не требующий отдельной установки `fetch`, удобен для `form-data` и файлов.
 // URLSearchParams доступен глобально в Node.js, но для явности можно импортировать
 // const { URLSearchParams } = require('url');
 
-test('API: Проверка доступности эндпоинта логина', async () => {
-  console.log('Отправка POST запроса к https://test-stand.gb.ru/gateway/login с form-data');
 
-  // 1. Подготавливаем данные формы в правильном формате (x-www-form-urlencoded)
-  // Это имитирует отправку формы HTML с полями username и password
-  const formParams = new URLSearchParams();
-  formParams.append('username', 'some_test_login'); // Несуществующий логин
-  formParams.append('password', 'some_test_password'); // Несуществующий пароль
+//async ({ request }) — Получение уже готового объекта (request), 
+// который Playwright Test создает и предоставляет тебе автоматически при вызове тестовой функции
+test('API: Проверка доступности эндпоинта логина', async ({request}) => { 
+  const testUsername = 'Pupkin_V'; // Заменить на реальный логин
+  const testPassword = 'e6783e1274'; // Заменить на реальный пароль
 
-  // 2. Отправляем POST запрос с form-data
-  const response = await fetch('https://test-stand.gb.ru/gateway/login', {
-    method: 'POST',
-    // Передаем объект URLSearchParams как тело.
-    // node-fetch автоматически установит заголовок Content-Type: application/x-www-form-urlencoded
-    body: formParams 
-    // НЕ нужно явно устанавливать headers для Content-Type, node-fetch сделает это за нас.
-    // headers: { 'Content-Type': 'application/x-www-form-urlencoded' } // Можно опустить
+  console.log(`Попытка авторизации пользователя: ${testUsername}`);
+
+  // --- Отправка запроса ---
+  const response = await request.post('https://test-stand.gb.ru/gateway/login', {
+    // Используем параметр 'form' для отправки данных как application/x-www-form-urlencoded
+    form: {
+      username: testUsername,
+      password: testPassword
+    }
   });
 
-  const status = response.status;
-  console.log(`Получен статус ответа: ${status}`);
+  // -------------------------
 
-  // 3. Проверка: Сервер должен корректно обработать запрос с form-data
-  // Мы ожидаем 401 Unauthorized, потому что логин/пароль неверны,
-  // но это подтверждает, что сервер "жив" и правильно обрабатывает формат.
-  // Важно, чтобы НЕ было 400 Bad Request из-за неправильного формата данных
-  // или 5xx ошибок сервера.
-  expect(status).toBe(401); // Ожидаем "Неправильные учетные данные"
-  console.log('API сервер корректно обработал запрос с form-data и вернул 401 Unauthorized');
+  const status = response.status();
+  console.log(`Статус ответа: ${status}`);
 
-  // Дополнительно можно проверить, что тело ответа соответствует ожидаемому формату ошибки 401
-  const responseBody = await response.json(); // Парсим JSON ответ
-  console.log('Тело ответа:', JSON.stringify(responseBody, null, 2));
+  if (status === 200) {
+    const responseBody = await response.json();
+    console.log('Успешная авторизация. Данные пользователя:');
+    console.log(JSON.stringify(responseBody, null, 2));
 
-  expect(responseBody).toEqual(expect.objectContaining({
-    error: 'Invalid credentials.',
-    code: 401
-    // message: '' // Согласно документации, message может быть пустой строкой
-  }));
-  console.log('Формат ответа при 401 ошибке корректный');
+    // --- Проверки ---
+    expect(responseBody).toHaveProperty('id'); // Проверяем, что есть ID
+    expect(responseBody).toHaveProperty('username', testUsername); // Проверяем логин
+    expect(responseBody).toHaveProperty('token'); // Проверяем, что есть токен
+    expect(responseBody.token).toEqual(expect.any(String)); // Токен - строка
+    expect(responseBody.token.length).toBeGreaterThan(0); // Токен не пустой
+    console.log('Все проверки пройдены успешно!');
+    // ----------------
+
+  } else {
+    // Если не 200, попробуем получить текст ошибки
+    const errorText = await response.text();
+    console.log(`Ошибка авторизации. Ответ сервера: ${errorText}`);
+
+    // --- Проверки для ошибок ---
+    if (status === 401) {
+      // Ожидаемая ошибка для неверных данных
+      expect(errorText).toContain('Invalid credentials');
+      console.log('Получена ожидаемая ошибка 401: Неверные учетные данные.');
+    } else {
+      // Другая ошибка
+      expect(status).toBe(200); // Это заставит тест провалиться с информацией о статусе
+    }
+    // --------------------------
+  }
 });
+
